@@ -219,5 +219,22 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
+# Node / Next.js
+node_modules/
+frontend/.next/
+frontend/out/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+
+# Local env variants
+.env.local
+.env.*.local
+
 .agents
 .cursor
