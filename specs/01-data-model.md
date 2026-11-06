@@ -39,6 +39,7 @@
 | `customer_id` | str | Unique, e.g. `C002` |
 | `name`, `contact_name`, `contact_email` | str | Email editable |
 | `phone`, `city`, `country`, `currency` | str | |
+| `last_reminder_sent_at` | datetime \| null | Cooldown; cleared on demo reset |
 
 **Indexes:** unique `customer_id`; unique `contact_email` (case-insensitive via normalized `contact_email_lower`).
 
@@ -135,6 +136,8 @@
 | `suggested_invoice_number` | str \| null | |
 | `suggested_score` | float \| null | 0–100 |
 | `suggested_reason` | str \| null | |
+| `candidates` | [{invoice_number, score}] | Top alternatives for UI choose |
+| `ui_hints` | [{invoice_number, why}] | Weak signals (e.g. amount-only) |
 | `chosen_invoice_number` | str \| null | Manual override before approve |
 | `tds_option` | `"close" \| "leave_open" \| null` | Required when underpay |
 

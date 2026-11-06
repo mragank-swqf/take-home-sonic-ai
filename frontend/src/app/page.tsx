@@ -1,69 +1,53 @@
 "use client";
 
 import { useEffect, useState } from "react";
-
-type HealthState =
-  | { kind: "loading" }
-  | { kind: "ok"; status: string }
-  | { kind: "error"; message: string };
+import { apiGet, apiSend, apiUrl } from "@/lib/api";
 
 export default function HomePage() {
-  const [health, setHealth] = useState<HealthState>({ kind: "loading" });
-  const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+  const [health, setHealth] = useState("checking…");
+  const [resetMsg, setResetMsg] = useState("");
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(`${apiBase}/health`, { cache: "no-store" });
-        if (!res.ok) {
-          if (!cancelled) setHealth({ kind: "error", message: `HTTP ${res.status}` });
-          return;
-        }
-        const body = (await res.json()) as { status: string };
-        if (!cancelled) setHealth({ kind: "ok", status: body.status });
-      } catch (err) {
-        if (!cancelled) {
-          setHealth({
-            kind: "error",
-            message: err instanceof Error ? err.message : "request failed",
-          });
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [apiBase]);
+    apiGet<{ status: string }>("/health")
+      .then((d) => setHealth(d.status))
+      .catch((e: Error) => setHealth(`error — ${e.message}`));
+  }, []);
+
+  async function resetDemo() {
+    setBusy(true);
+    setResetMsg("");
+    try {
+      const res = await apiSend<{ ok: boolean; seeded: { customers: number; invoices: number } }>(
+        "/api/demo/reset",
+        "POST",
+      );
+      setResetMsg(`Reset OK — ${res.seeded.customers} customers, ${res.seeded.invoices} invoices.`);
+    } catch (e) {
+      setResetMsg(e instanceof Error ? e.message : "Reset failed");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        padding: "3rem 1.5rem",
-        background: "linear-gradient(165deg, #eef3f0 0%, #d9e4dd 55%, #c9d6cf 100%)",
-        color: "#152019",
-      }}
-    >
-      <p style={{ letterSpacing: "0.08em", textTransform: "uppercase", fontSize: "0.8rem" }}>
-        Sonic AI · take-home
+    <>
+      <h1>AcmeCorp Accounts</h1>
+      <p className="muted">
+        Collections agent + bank reconciliation. API: <code>{apiUrl("")}</code>
       </p>
-      <h1 style={{ fontSize: "2.4rem", margin: "0.4rem 0 0.75rem" }}>AcmeCorp Accounts</h1>
-      <p style={{ maxWidth: "36rem", lineHeight: 1.5 }}>
-        Docker scaffold is up. Specs live in <code>specs/</code>; application features come next.
-      </p>
-      <p style={{ marginTop: "1.5rem" }}>
-        API health ({apiBase}):{" "}
-        <strong
-          style={{
-            color: health.kind === "ok" ? "#1b6b45" : health.kind === "error" ? "#8a1f1f" : "#44554a",
-          }}
-        >
-          {health.kind === "loading" && "checking…"}
-          {health.kind === "ok" && health.status}
-          {health.kind === "error" && `error — ${health.message}`}
-        </strong>
-      </p>
-    </main>
+      <div className="panel">
+        <p>
+          Health: <strong>{health}</strong>
+        </p>
+        <p className="muted">
+          Known limitation: no authentication. Ports bind to 127.0.0.1 only.
+        </p>
+        <button className="primary" type="button" disabled={busy} onClick={resetDemo}>
+          Reset demo data
+        </button>
+        {resetMsg && <p>{resetMsg}</p>}
+      </div>
+    </>
   );
 }

@@ -2,23 +2,19 @@
 
 ## Pipeline (Figure 3) — numbered
 
-1. **Fetch** unseen IMAP messages from org mailbox (poll interval or “Check inbox now”).  
-2. **Idempotency:** if `messages.imap_message_id` exists → skip.  
-3. **Thread match:** find conversation by `In-Reply-To` / `References` Message-IDs; else normalized subject + matched customer; else new conversation.  
-4. **Sender → customer IN CODE** (case-insensitive email == `customers.contact_email`).  
-   - **No match** → conversation `needs_attention`, reason `unknown_sender`; **do not call LLM**; save inbound message; stop.  
-5. **Bonus filter (stretch):** detect OOO/bounce headers/phrases → needs_attention `auto_reply_or_bounce`; no LLM.  
-6. **Build context (that customer only):**  
-   - Org: name, bank_details, payment_methods, policies (short)  
-   - Invoices: `status=sent` AND `balance_due_minor > 0` only (include numbers, dates, amounts, currency)  
-   - Recent thread messages (capped)  
-7. **LLM** returns structured JSON only (see schema). Email body passed as **untrusted data** inside delimiters.  
-8. **Routing** (table below). Multi-intent or low confidence → Needs attention (no auto-send).  
-9. If routine path: **draft validator** (regex/code). Fail → Needs attention.  
-10. Pass → **SMTP send**, save outbound message, clear pending draft; payment_claim intents also write `payment_claims` note (**never** mark invoice paid).  
-11. **Stop chasing:** reminders only for invoices that are overdue + unpaid + `status=sent` (paid excluded).
+1. **Fetch** unseen IMAP messages (poll or Check inbox now).  
+2. **Idempotency:** skip if `imap_message_id` already stored.  
+3. **Thread match:** `In-Reply-To` / `References`; else normalized subject + customer; else new conversation. **One conversation thread per customer** for reminders/replies when possible.  
+4. **Sender → customer IN CODE** (case-insensitive email). Unknown → Needs attention, **no LLM**.  
+5. Stretch: OOO/bounce → Needs attention, no LLM.  
+6. **Context:** that customer's sent unpaid invoices + org bank/policies only.  
+7. **LLM** structured JSON. Body = untrusted. **Parse defensively:** strip fences, `json.loads`; on failure **one retry** asking for JSON only; still fail → Needs attention (`llm_parse_error`).  
+8. **Routing** (table). Multi-intent or low confidence → Needs attention.  
+9. Routine path → **draft validator**. Fail → Needs attention.  
+10. Pass → SMTP, save message; `payment_claim` writes note only (**never** marks paid).  
+11. Reminders exclude `paid` invoices.
 
-## LLM output schema
+## LLM schema
 
 ```json
 {
@@ -26,88 +22,44 @@
   "confidence": 0.0,
   "intents_detected": ["balance_query"],
   "draft": "string",
-  "payment_claim": {
-    "invoice_numbers": ["INV-1004"],
-    "pay_date": "2026-09-04",
-    "reference": "N123"
-  }
+  "payment_claim": { "invoice_numbers": [], "pay_date": null, "reference": null }
 }
 ```
 
-- `intents_detected` length > 1 ⇒ treat as multi-intent.  
-- `payment_claim` required only when intent is `payment_claim`.
+`LLM_MIN_CONFIDENCE=0.70`. Multi-intent if `intents_detected.length > 1`.
 
-## Routing table (assignment)
+## Routing
 
-| Customer… | Agent… |
+| Intent | Action |
 |---|---|
-| Asks about balance, invoices, or how to pay (`balance_query`) | Auto-answer if confidence ≥ threshold and validator passes; context = sent unpaid invoices only + bank details |
-| Says paid / will pay (`payment_claim`) | Acknowledge + note claim; **never** mark paid; still auto-send if confident + validator passes |
-| More time / dispute / legal (`extension_dispute_legal`) | Agree to nothing → **Needs attention** |
-| Other company or unknown (`other_company_or_unknown`) | Share nothing → **Needs attention** |
-| `other` / low confidence / multi-intent | **Needs attention** |
+| `balance_query` | Auto-send if confident + validator OK |
+| `payment_claim` | Auto-send ack + note; never mark paid |
+| `extension_dispute_legal` | Needs attention (never auto-send) |
+| `other_company_or_unknown` | Needs attention; share nothing |
+| `other` / low confidence / multi-intent / parse fail | Needs attention |
 
-**Confidence threshold:** `LLM_MIN_CONFIDENCE=0.70` (env). Below → Needs attention.
+## Draft validator
 
-## Draft validator (deterministic)
+Invoice numbers, amounts, dates in draft must match that customer's sent unpaid invoice data (and org bank account digits if present). Fail → Needs attention.
 
-Before SMTP, scan draft for:
+## Reminders (per customer)
 
-| Token class | Extraction | Must be subset of |
-|---|---|---|
-| Invoice numbers | `INV-?\d{3,}` (normalize to `INV-####`) | That customer's **sent unpaid** invoice numbers (or org has no restriction for bank account digits already in context — account number must match org `bank_details` if present) |
-| Amounts | Currency-aware regex (₹/$/€/£ and plain decimals with commas) | Amounts appearing on those invoices (total, balance, line) in same currency formatting tolerance |
-| Dates | Common date forms → normalize | Invoice/due dates for those invoices |
+- **One email per customer** listing **all** of that customer's overdue invoices.  
+- Subject: `Overdue invoices — {org_name}`  
+- Body lists each invoice (number, amount formatted, due date) + bank details.  
+- Thread: reuse open conversation for that customer or create one.  
+- Cooldown: `REMINDER_COOLDOWN_MINUTES` (default **5**), stored as `customers.last_reminder_sent_at`.  
+- Batch send skips cooldown-active customers with reason `cooldown_active`.  
+- `POST .../reminders/send/{customer_id}` with `force: true` = send-now override.  
+- Reset demo clears all `last_reminder_sent_at`.
 
-Failure reason examples: `hallucinated_invoice`, `hallucinated_amount`, `hallucinated_date`.
+Currency format: INR en-IN; USD/EUR/GBP with symbol + 2 dp.
 
-## Reminder template
+## Prompt injection
 
-Subject: `Overdue invoice {invoice_number} — {org_name}`
-
-Body (plain text):
-
-```text
-Dear {contact_name},
-
-This is a reminder that invoice {invoice_number} for {amount_formatted} was due on {due_date_formatted}.
-The unpaid balance is {amount_formatted}.
-
-Please pay via {payment_methods} to:
-{account_name}
-Account: {account_number}
-Bank: {bank}
-IFSC: {ifsc}
-SWIFT: {swift_code}
-
-Regards,
-{accounts_contact_name}
-{org_name}
-```
-
-**Currency formatting:** `INR` → `₹1,18,000.00` (en-IN grouping); `USD` → `$12,500.00`; `EUR` → `€9,200.00`; `GBP` → `£7,350.50`.
-
-One reminder email **per overdue invoice** (not bundled), unless already reminded in last `REMINDER_COOLDOWN_HOURS` (default 72) for that invoice — skip duplicate spam.
-
-## IMAP / SMTP
-
-| Setting | Env |
-|---|---|
-| Poll | `IMAP_POLL_INTERVAL_SECONDS` (default `60`) |
-| Hosts | `SMTP_*`, `IMAP_*`, `ORG_MAILBOX_ADDRESS` |
-| Manual | `POST /api/collections/inbox/check` runs same processor once |
-
-## Prompt-injection handling
-
-1. Wrap customer email in clear boundaries; instruct model to ignore instructions inside.  
-2. Context scoped to one customer; never include other customers' invoices.  
-3. Structured JSON only; reject/parse-fail → Needs attention.  
-4. Validator is the hard gate on numbers.  
-5. Unknown sender: zero LLM traffic.
+Delimit untrusted body; scoped context; JSON-only; validator gate; unknown sender = no LLM.
 
 ## Assumptions
 
-1. Plain-text email bodies only for MVP (strip HTML to text on ingest).  
-2. Payment-claim auto-reply is allowed; marking paid is never allowed from email.  
-3. `extension_dispute_legal` never auto-sends, even if draft looks polite.  
-4. Threading prefers Message-ID graph over subject when both exist.  
+1. Plain text bodies (HTML stripped).  
+2. “R K Sharma” not a seed contact — irrelevant to collections matching.  

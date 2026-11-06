@@ -1,6 +1,6 @@
 # Sonic AI — Software Engineering Intern take-home
 
-AcmeCorp accounts demo: collections agent + bank reconciliation.
+AcmeCorp accounts demo: overdue collections by email + bank reconciliation suggestions.
 
 ## Run with Docker
 
@@ -8,12 +8,7 @@ AcmeCorp accounts demo: collections agent + bank reconciliation.
 cp .env.example .env
 ```
 
-Edit `.env` and set at least:
-
-- Your org Gmail (or other) address + **App Password** for `SMTP_*` / `IMAP_*` / `ORG_MAILBOX_ADDRESS`
-- An OpenAI-compatible `LLM_API_KEY`, `LLM_BASE_URL`, and `LLM_MODEL` (Groq / OpenRouter / Gemini bridge / OpenAI all work by changing these)
-
-Then:
+Fill in SMTP/IMAP credentials (Gmail App Password recommended) and an OpenAI-compatible LLM key (`LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`).
 
 ```bash
 docker compose up --build
@@ -21,42 +16,42 @@ docker compose up --build
 
 | Service | URL |
 |---|---|
-| Frontend | http://localhost:3000 |
-| Backend health | http://localhost:8000/health |
+| Frontend | http://127.0.0.1:3000 |
+| Backend health | http://127.0.0.1:8000/health |
+
+Ports bind to **127.0.0.1 only**. Mongo is **not** published to the host.
 
 On first backend start (empty DB), seed data loads from `data/`.  
-`POST http://localhost:8000/api/demo/reset` reloads demo data and clears conversations/payments.
+`POST /api/demo/reset` reloads seed data and clears conversations, payments, statements, and reminder cooldowns.
 
-Specs for the full app are in `specs/`. Assignment brief: `docs/ASSIGNMENT.md`.
+## Known limitation: no authentication
+
+There is **no login**. This matches the take-home demo scope so evaluators can run quickly. It is only acceptable because Compose publishes the UI/API on loopback (`127.0.0.1`). Do not expose these ports on a public network.
+
+## Specs
+
+Design docs live in `specs/` (`00`–`06`, `tasks.md`). Assignment brief: `docs/ASSIGNMENT.md`.
 
 ## Troubleshooting
 
 ### Gmail SMTP/IMAP
 
 1. Use a dedicated test Google account.  
-2. Enable 2-Step Verification, then create an **App Password** (Google Account → Security).  
-3. Put the app password in `SMTP_PASSWORD` and `IMAP_PASSWORD` (not your normal login password).  
-4. Ensure IMAP is enabled in Gmail settings.  
-5. If Google blocks sign-in, try again after unlocking / allowing the app password.
+2. Enable 2-Step Verification → create an **App Password**.  
+3. Put that app password in `SMTP_PASSWORD` and `IMAP_PASSWORD`.  
+4. Enable IMAP in Gmail settings.
 
 ### Port conflicts
 
-If `3000` or `8000` is already in use, stop the other process or change the left-hand ports in `docker-compose.yml` (e.g. `"3001:3000"`). Keep `NEXT_PUBLIC_API_URL` and `CORS_ORIGINS` aligned with whatever you publish.
+If `3000` or `8000` is in use, stop the other process or change the published ports in `docker-compose.yml` (keep the `127.0.0.1:` prefix). Align `NEXT_PUBLIC_API_URL` and `CORS_ORIGINS`.
 
 ### Frontend shows API error
 
-Confirm backend is healthy: open http://localhost:8000/health.  
-`NEXT_PUBLIC_API_URL` must be reachable **from your browser** (usually `http://localhost:8000`).
+Open http://127.0.0.1:8000/health. `NEXT_PUBLIC_API_URL` must be reachable from the browser.
 
-### Mongo / rebuild
-
-```bash
-docker compose down
-docker compose up --build
-```
-
-To wipe the database volume:
+### Wipe database volume
 
 ```bash
 docker compose down -v
+docker compose up --build
 ```

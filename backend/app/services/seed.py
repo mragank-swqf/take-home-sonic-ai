@@ -9,6 +9,19 @@ from app.services.money import to_minor
 
 SEED_VERSION = "data-v1"
 
+APP_COLLECTIONS = (
+    "organization",
+    "customers",
+    "invoices",
+    "conversations",
+    "messages",
+    "payments",
+    "payment_claims",
+    "bank_statement_uploads",
+    "bank_statement_rows",
+    "meta",
+)
+
 
 def _data_path(name: str) -> Path:
     return Path(get_settings().data_dir) / name
@@ -26,7 +39,6 @@ def db_is_empty(db: Database) -> bool:
 
 
 def seed_if_empty(db: Database) -> bool:
-    """Load data/ into Mongo when empty. Returns True if seeding ran."""
     if not db_is_empty(db):
         return False
     reset_and_seed(db)
@@ -34,19 +46,7 @@ def seed_if_empty(db: Database) -> bool:
 
 
 def reset_and_seed(db: Database) -> dict[str, int]:
-    """Clear demo collections and reload from data/ (idempotent content)."""
-    for name in (
-        "organization",
-        "customers",
-        "invoices",
-        "conversations",
-        "messages",
-        "payments",
-        "payment_claims",
-        "bank_statement_uploads",
-        "bank_statement_rows",
-        "meta",
-    ):
+    for name in APP_COLLECTIONS:
         db[name].delete_many({})
 
     org = _load_json("organization.json")
@@ -56,22 +56,22 @@ def reset_and_seed(db: Database) -> dict[str, int]:
     customers = _load_json("customers.json")
     for c in customers:
         c["contact_email_lower"] = c["contact_email"].strip().lower()
+        c["last_reminder_sent_at"] = None
     if customers:
         db["customers"].insert_many(customers)
 
     invoices_raw = _load_json("invoices.json")
     invoices = []
     for inv in invoices_raw:
-        line_items = []
-        for item in inv["line_items"]:
-            line_items.append(
-                {
-                    "description": item["description"],
-                    "quantity": item["quantity"],
-                    "unit_price_minor": to_minor(item["unit_price"]),
-                    "amount_minor": to_minor(item["amount"]),
-                }
-            )
+        line_items = [
+            {
+                "description": item["description"],
+                "quantity": item["quantity"],
+                "unit_price_minor": to_minor(item["unit_price"]),
+                "amount_minor": to_minor(item["amount"]),
+            }
+            for item in inv["line_items"]
+        ]
         invoices.append(
             {
                 "invoice_number": inv["invoice_number"],
@@ -101,6 +101,7 @@ def reset_and_seed(db: Database) -> dict[str, int]:
     db["invoices"].create_index("invoice_number", unique=True)
     db["invoices"].create_index([("customer_id", 1), ("status", 1)])
     db["messages"].create_index("imap_message_id", unique=True, sparse=True)
+    db["bank_statement_uploads"].create_index("content_sha256", unique=True)
 
     db["meta"].insert_one(
         {

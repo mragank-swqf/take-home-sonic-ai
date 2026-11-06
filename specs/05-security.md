@@ -79,9 +79,17 @@ Implementation: slowapi or simple in-memory token bucket (document Docker single
 
 - Backend container runs as **non-root**.  
 - No secrets in images; only env at runtime.  
-- Frontend never receives SMTP/IMAP/LLM keys.
+- Frontend never receives SMTP/IMAP/LLM keys.  
+- Compose binds published ports to **`127.0.0.1` only**.  
+- **Mongo port is not published** to the host.
+
+## LLM JSON
+
+- Defensive parse (strip markdown fences, `json.loads`).  
+- **One retry** with a stricter “JSON only” prompt.  
+- Still invalid → Needs attention (`llm_parse_error`); never crash the poller.
 
 ## Assumptions
 
-1. No authentication for evaluator convenience on localhost — called out in README as demo-only.  
+1. **No authentication** — intentional demo limitation for localhost evaluators; documented in README. Do not expose beyond loopback.  
 2. Single-worker uvicorn for in-memory rate limit correctness.  
