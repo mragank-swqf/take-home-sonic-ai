@@ -28,6 +28,22 @@ On first backend start (empty DB), seed data loads from `data/`.
 
 There is **no login**. This matches the take-home demo scope so evaluators can run quickly. It is only acceptable because Compose publishes the UI/API on loopback (`127.0.0.1`). Do not expose these ports on a public network.
 
+## Status and limitations
+
+| Area | Status |
+|---|---|
+| Part A (org, customers, invoices, reset) | Done |
+| Reconciliation matcher + approve/reject/choose/TDS | Done |
+| Reminder send, LLM classify/validate/route, Needs attention | Done |
+| IMAP inbound fetch / auto-ingest replies | Partial — fails in my environment; not fixed |
+| Rate limiting | Not done |
+| Bonus: multi-invoice approve split | Not done (sum mentioned in reason only) |
+| Bonus: payment-email ↔ bank row link | Not done |
+| Bonus: OOO / bounce detection | Not done |
+| Authentication | Not done (known limitation for local eval) |
+
+Technical write-up: `docs/explanation.md` and `explanation.pdf`.
+
 ## Specs
 
 Design docs live in `specs/` (`00`–`06`, `tasks.md`). Assignment brief: `docs/ASSIGNMENT.md`.
