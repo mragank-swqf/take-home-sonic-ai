@@ -130,21 +130,59 @@ explanation.pdf # 2-page technical write-up
 
 ---
 
-## Useful API endpoints
+## API
+
+### Demo / Health
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/health` | Liveness |
-| POST | `/api/demo/reset` | Reseed + clear demo state |
-| GET | `/api/organization` | Org profile |
-| GET/PATCH | `/api/customers`, `/api/customers/{id}` | List / edit email |
-| GET | `/api/invoices?overdue=true` | Invoices (+ computed overdue) |
-| POST | `/api/reconciliation/uploads` | Upload statement CSV |
-| GET | `/api/reconciliation/uploads/{id}/suggestions` | Suggestions |
-| POST | `/api/collections/reminders/send` | Send overdue reminders |
-| POST | `/api/collections/inbox/check` | Fetch IMAP once |
+| GET | `/health` | Liveness check |
+| POST | `/api/demo/reset` | Reseed demo data; clear conversations, payments, statements, reminder cooldowns |
 
-Full API shape: `specs/02-api.md`.
+### Organization
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/organization` | Get AcmeCorp organization profile |
+
+### Customers
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/customers` | List customers |
+| GET | `/api/customers/{customer_id}` | Get one customer |
+| PATCH | `/api/customers/{customer_id}` | Update customer contact email |
+
+### Invoices
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/invoices` | List invoices (`customer_id`, `status`, `overdue` query params) |
+| GET | `/api/invoices/{invoice_number}` | Get one invoice (includes computed overdue) |
+
+### Collections
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/collections/reminders/send` | Send overdue reminders (optional `customer_ids`) |
+| POST | `/api/collections/reminders/send/{customer_id}` | Send reminder for one customer (`force` bypasses cooldown) |
+| POST | `/api/collections/inbox/check` | Fetch unseen IMAP mail once and process |
+| GET | `/api/collections/conversations` | List conversations (optional `status`) |
+| GET | `/api/collections/conversations/{conversation_id}` | Get conversation with messages |
+| GET | `/api/collections/needs-attention` | List Needs attention items |
+| PATCH | `/api/collections/needs-attention/{conversation_id}` | Update pending draft |
+| POST | `/api/collections/needs-attention/{conversation_id}/send` | Send edited draft |
+
+### Reconciliation
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/reconciliation/uploads` | Upload bank statement CSV |
+| GET | `/api/reconciliation/uploads` | List statement uploads |
+| GET | `/api/reconciliation/uploads/{upload_id}/suggestions` | List match suggestions for an upload |
+| POST | `/api/reconciliation/rows/{row_id}/approve` | Approve match and apply payment |
+| POST | `/api/reconciliation/rows/{row_id}/reject` | Reject suggestion |
+| POST | `/api/reconciliation/rows/{row_id}/choose-invoice` | Manually choose invoice before approve |
 
 ---
 
@@ -161,19 +199,32 @@ Full API shape: `specs/02-api.md`.
 
 ---
 
-## Status and limitations
+## Known limitation: no authentication
 
-| Area | Status |
-|---|---|
-| Part A (org, customers, invoices, reset) | Done |
-| Reconciliation matcher + approve/reject/choose/TDS | Done |
-| Reminder send, LLM classify/validate/route, Needs attention | Done |
-| IMAP inbound fetch / auto-ingest replies | Partial — fails in my environment; not fixed |
-| Rate limiting | Not done |
-| Bonus: multi-invoice approve split | Not done (sum mentioned in reason only) |
-| Bonus: payment-email ↔ bank row link | Not done |
-| Bonus: OOO / bounce detection | Not done |
-| Authentication | Not done (known limitation for local eval) |
+There is **no login**. This is intentional for local evaluation. Compose publishes the UI and API on `127.0.0.1` only — do not expose these ports on a public network.
+
+## Status: Done / Partial / Not done
+
+| Area | Status | Notes |
+|---|---|---|
+| Part A: organization, customers, invoices, overdue and unpaid, email edit, Reset demo data | Done | Overdue is computed, never stored |
+| Part B: SMTP reminders (one email per customer) | Done | Cooldown configurable via `REMINDER_COOLDOWN_MINUTES` |
+| Part B: LLM classification, draft validation, routing, Needs attention edit-and-send | Done | Sender matched in code before any LLM call; validator checks amounts, dates and invoice numbers against the DB |
+| Part B: inbound IMAP fetch | **Partial** | Failed in my environment and was not fixed, so replies are not ingested automatically |
+| Part C: bank reconciliation (local matching, score and reason, approve/reject/choose, TDS close or leave open) | Done | Weighted fuzzy matching, no LLM in the core |
+| Bonus items (multi-invoice split, payment-email link, out-of-office/bounce) | Not done | Not implemented due to time constraints |
+| Rate limiting | Not done | Not implemented due to time constraints |
+| Authentication | Not done | Deliberate; see Known limitation above |
+
+## Key decisions
+
+- Money is stored as integer minor units.
+- `DEMO_AS_OF_DATE` optionally pins "today" for overdue calculations; otherwise UTC today.
+- Matching weights 40/30/25/5, suggestion threshold 55, ambiguity margin 8, currency is a hard filter.
+- TDS applies only to INR invoices for India customers: total minus 10% of subtotal.
+- Precision over recall: ambiguous or unrecognised payers return None, with candidates offered in the UI.
+- Payment claims by email are acknowledged but never mark an invoice paid.
+- Full design details are in `explanation.pdf`.
 
 More detail: `docs/explanation.md`, `explanation.pdf`. Specs: `specs/`. Assignment brief: `docs/ASSIGNMENT.md`.
 
